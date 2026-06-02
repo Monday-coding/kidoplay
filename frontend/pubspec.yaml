@@ -1,0 +1,39 @@
+name: kidoplay
+description: KidoPlay - Hong Kong Children's Learning App
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.2
+  # State Management
+  flutter_riverpod: ^2.4.9
+  # Networking
+  dio: ^5.4.0
+  # Storage
+  shared_preferences: ^2.2.2
+  hive_flutter: ^1.1.0
+  # Game Engine
+  flame: ^1.12.0
+  # UI
+  google_fonts: ^6.1.0
+  # Auth
+  flutter_secure_storage: ^9.0.0
+  # AI/ML
+  tflite_flutter: ^0.8.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/audio/
+    - assets/games/

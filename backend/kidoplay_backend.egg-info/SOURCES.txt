@@ -1,0 +1,7 @@
+pyproject.toml
+kidoplay_backend.egg-info/PKG-INFO
+kidoplay_backend.egg-info/SOURCES.txt
+kidoplay_backend.egg-info/dependency_links.txt
+kidoplay_backend.egg-info/top_level.txt
+tests/test_auth.py
+tests/test_models.py

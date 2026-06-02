@@ -1,0 +1,5 @@
+Metadata-Version: 2.4
+Name: kidoplay-backend
+Version: 0.1.0
+Summary: Kidoplay - AI Learning Platform for Kids
+Requires-Python: >=3.10
