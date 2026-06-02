@@ -26,71 +26,6 @@ router = APIRouter(prefix="/api/games", tags=["games"])
 
 bkt_engine = BKTEngine()
 
-# Mock question bank for development
-MOCK_QUESTIONS = {
-    "MATH": [
-        {
-            "skill_id": "math_add_01",
-            "difficulty": 1,
-            "content": {"text": "3 + 5 = ?", "type": "choice", "options": ["6", "7", "8", "9"], "answer": "8"},
-        },
-        {
-            "skill_id": "math_add_01",
-            "difficulty": 2,
-            "content": {"text": "12 + 7 = ?", "type": "choice", "options": ["17", "18", "19", "20"], "answer": "19"},
-        },
-        {
-            "skill_id": "math_sub_01",
-            "difficulty": 1,
-            "content": {"text": "9 - 4 = ?", "type": "choice", "options": ["3", "4", "5", "6"], "answer": "5"},
-        },
-        {
-            "skill_id": "math_mul_01",
-            "difficulty": 2,
-            "content": {"text": "3 × 4 = ?", "type": "choice", "options": ["7", "10", "12", "15"], "answer": "12"},
-        },
-        {
-            "skill_id": "math_div_01",
-            "difficulty": 2,
-            "content": {"text": "12 ÷ 3 = ?", "type": "choice", "options": ["3", "4", "5", "6"], "answer": "4"},
-        },
-    ],
-    "CHIN": [
-        {
-            "skill_id": "chinese_pinyin_01",
-            "difficulty": 1,
-            "content": {"text": "「天」的拼音係咩？", "type": "choice", "options": ["tiān", "tān", "diān", "tiàn"], "answer": "tiān"},
-        },
-        {
-            "skill_id": "chinese_char_01",
-            "difficulty": 2,
-            "content": {"text": "「貓」有幾多畫？", "type": "choice", "options": ["13", "14", "15", "16"], "answer": "14"},
-        },
-    ],
-    "LOGIC": [
-        {
-            "skill_id": "logic_pattern_01",
-            "difficulty": 2,
-            "content": {"text": "2, 4, 6, 8, ? 下一數係咩？", "type": "choice", "options": ["9", "10", "11", "12"], "answer": "10"},
-        },
-    ],
-    "SCI": [
-        {
-            "skill_id": "sci_nature_01",
-            "difficulty": 1,
-            "content": {"text": "植物需要咩嚟光合作用？", "type": "choice", "options": ["陽光", "月亮", "風", "雪"], "answer": "陽光"},
-        },
-    ],
-    "MUSIC": [
-        {
-            "skill_id": "music_note_01",
-            "difficulty": 1,
-            "content": {"text": "C大調有幾多個音？", "type": "choice", "options": ["5", "6", "7", "8"], "answer": "7"},
-        },
-    ],
-}
-
-
 @router.get("/subjects")
 async def list_subjects(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Subject).where(Subject.is_active == True))
@@ -117,23 +52,32 @@ async def recommend_question(
     if not child:
         raise HTTPException(status_code=404, detail="Child profile not found")
 
-    # Get mock questions for this subject
-    questions = MOCK_QUESTIONS.get(subject, MOCK_QUESTIONS["MATH"])
+    # Fetch real questions from DB
+    q_result = await db.execute(
+        select(Question).join(Subject).where(
+            Subject.code == subject.upper(),
+            Question.difficulty <= 5
+        ).limit(count * 2)  # Fetch more to allow BKT filtering
+    )
+    db_questions = q_result.scalars().all()
+
+    if not db_questions:
+        return QuestionResponse(questions=[], child_id=child_id, subject=subject)
 
     # Get BKT state for this child (load from DB)
     await bkt_engine.load_child_states(db, child_id)
     bkt_result = await db.execute(
         select(BKTState).where(
             BKTState.child_id == child_id,
-            BKTState.skill_id.in_([q["skill_id"] for q in questions]),
+            BKTState.skill_id.in_([q.skill_id for q in db_questions]),
         )
     )
     bkt_states = {s.skill_id: s for s in bkt_result.scalars().all()}
 
     # Score questions by BKT (lower mastery = higher priority)
     scored = []
-    for q in questions:
-        bkt = bkt_states.get(q["skill_id"])
+    for q in db_questions:
+        bkt = bkt_states.get(q.skill_id)
         if bkt:
             priority = 1.0 - bkt.p_l  # Lower mastery = higher priority
         else:
@@ -142,10 +86,19 @@ async def recommend_question(
 
     # Sort by priority descending, pick top N
     scored.sort(key=lambda x: x[1], reverse=True)
-    selected = [q for q, _ in scored[:count]]
+    selected = scored[:count]
+
+    # Format response
+    questions_out = []
+    for q, _ in selected:
+        questions_out.append({
+            "skill_id": q.skill_id,
+            "difficulty": q.difficulty,
+            "content": q.content,
+        })
 
     return QuestionResponse(
-        questions=selected,
+        questions=questions_out,
         child_id=child_id,
         subject=subject,
     )
