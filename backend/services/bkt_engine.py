@@ -18,6 +18,11 @@ New skill initialization:
   p_l = 0.5 (uniform prior)
 """
 
+import uuid
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from backend.models.bkt_state import BKTState as BKTStateORM
+
 
 class BKTState:
     def __init__(
@@ -83,7 +88,7 @@ class BKTState:
 
 
 class BKTEngine:
-    """Manages BKT states per child per skill."""
+    """Manages BKT states per child per skill with DB persistence."""
 
     def __init__(self):
         self._states: dict[str, BKTState] = {}  # key: "child_id:skill_id"
@@ -132,3 +137,55 @@ class BKTEngine:
                 skill_id = key.split(":", 1)[1]
                 result[skill_id] = state.to_dict()
         return result
+
+    # ---- DB persistence (async) ----
+
+    async def load_child_states(self, db: AsyncSession, child_id: uuid.UUID) -> dict[str, BKTState]:
+        """Load all BKT states for a child from DB into in-memory cache."""
+        result = await db.execute(
+            select(BKTStateORM).where(BKTStateORM.child_id == child_id)
+        )
+        for orm_state in result.scalars().all():
+            key = f"{child_id}:{orm_state.skill_id}"
+            self._states[key] = BKTState(
+                p_l=orm_state.p_l,
+                p_t=orm_state.p_t,
+                p_g=orm_state.p_g,
+                p_s=orm_state.p_s,
+            )
+            self._states[key].attempts = orm_state.total_attempts
+            self._states[key].correct = orm_state.correct_attempts
+        return self._states
+
+    async def save_state(self, db: AsyncSession, child_id: uuid.UUID, skill_id: str) -> BKTState | None:
+        """Persist a single BKT state back to DB."""
+        key = f"{child_id}:{skill_id}"
+        state = self._states.get(key)
+        if state is None:
+            return None
+
+        orm = await db.execute(
+            select(BKTStateORM).where(
+                BKTStateORM.child_id == child_id,
+                BKTStateORM.skill_id == skill_id,
+            )
+        )
+        record = orm.scalar_one_or_none()
+
+        if record is None:
+            record = BKTStateORM(
+                child_id=child_id,
+                skill_id=skill_id,
+            )
+            db.add(record)
+
+        record.p_l = state.p_l
+        record.p_t = state.p_t
+        record.p_g = state.p_g
+        record.p_s = state.p_s
+        record.total_attempts = state.attempts
+        record.correct_attempts = state.correct
+        record.last_practiced = __import__("datetime").date.today().isoformat()
+
+        await db.flush()
+        return state

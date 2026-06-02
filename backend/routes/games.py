@@ -120,7 +120,8 @@ async def recommend_question(
     # Get mock questions for this subject
     questions = MOCK_QUESTIONS.get(subject, MOCK_QUESTIONS["MATH"])
 
-    # Get BKT state for this child
+    # Get BKT state for this child (load from DB)
+    await bkt_engine.load_child_states(db, child_id)
     bkt_result = await db.execute(
         select(BKTState).where(
             BKTState.child_id == child_id,
@@ -165,6 +166,9 @@ async def submit_answer(
     if not child:
         raise HTTPException(status_code=404, detail="Child profile not found")
 
+    # Load BKT states from DB for this child
+    await bkt_engine.load_child_states(db, data.child_id)
+
     # Get question
     q_result = await db.execute(
         select(Question).where(Question.id == data.question_id)
@@ -181,8 +185,12 @@ async def submit_answer(
         xp = 10 * question.difficulty if is_correct else 0
         stars = 1 if is_correct else 0
 
-    # Update BKT
-    bkt = bkt_engine.update(str(data.child_id), question.skill_id if question else data.skill_id, is_correct)
+    # Update BKT (in-memory, then persist)
+    skill_id = question.skill_id if question else data.skill_id
+    bkt = bkt_engine.update(str(data.child_id), skill_id, is_correct)
+
+    # Persist updated BKT state to DB
+    await bkt_engine.save_state(db, data.child_id, skill_id)
 
     # Create session record
     session = GameSession(
@@ -202,33 +210,6 @@ async def submit_answer(
     child.xp_total += xp
     child.stars_total += stars
     child.last_active_date = __import__("datetime").date.today().isoformat()
-
-    # Update BKT in DB
-    bkt_record = await db.execute(
-        select(BKTState).where(
-            BKTState.child_id == data.child_id,
-            BKTState.skill_id == (question.skill_id if question else data.skill_id),
-        )
-    )
-    bkt_db = bkt_record.scalar_one_or_none()
-    if bkt_db:
-        bkt_db.p_l = bkt.p_l
-        bkt_db.total_attempts = bkt.attempts
-        bkt_db.correct_attempts = bkt.correct
-        bkt_db.last_practiced = __import__("datetime").date.today().isoformat()
-    else:
-        bkt_db = BKTState(
-            child_id=data.child_id,
-            skill_id=question.skill_id if question else data.skill_id,
-            p_l=bkt.p_l,
-            p_t=bkt.p_t,
-            p_g=bkt.p_g,
-            p_s=bkt.p_s,
-            total_attempts=bkt.attempts,
-            correct_attempts=bkt.correct,
-            last_practiced=__import__("datetime").date.today().isoformat(),
-        )
-        db.add(bkt_db)
 
     await db.flush()
 
